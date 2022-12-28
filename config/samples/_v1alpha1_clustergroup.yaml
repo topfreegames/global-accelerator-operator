@@ -1,0 +1,12 @@
+apiVersion: infrastructure.wildlife.io/v1alpha1
+kind: ClusterGroup
+metadata:
+  labels:
+    app.kubernetes.io/name: clustergroup
+    app.kubernetes.io/instance: clustergroup-sample
+    app.kubernetes.io/part-of: global-accelerator-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: global-accelerator-operator
+  name: clustergroup-sample
+spec:
+  # TODO(user): Add fields here
