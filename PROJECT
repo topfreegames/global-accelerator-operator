@@ -1,0 +1,7 @@
+domain: infrastructure.wildlife.io
+layout:
+- go.kubebuilder.io/v4-alpha
+multigroup: true
+projectName: global-accelerator-operator
+repo: github.com/topfreegames/global-accelerator-operator
+version: "3"
