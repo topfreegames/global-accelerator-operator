@@ -9,4 +9,17 @@ metadata:
     app.kubernetes.io/created-by: global-accelerator-operator
   name: clustergroup-sample
 spec:
-  # TODO(user): Add fields here
+  spec:
+    clusters:
+      - credentialsRef:
+          name: remote-cluster-a-kubeconfig
+          namespace: global-accelerator-operator-system
+        name: remote-cluster-a
+      - credentialsRef:
+          name: remote-cluster-b-kubeconfig
+          namespace: global-accelerator-operator-system
+        name: remote-cluster-b
+      - credentialsRef:
+          name: remote-cluster-c-kubeconfig
+          namespace: global-accelerator-operator-system
+        name: remote-cluster-c
