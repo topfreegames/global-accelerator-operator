@@ -18,8 +18,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
-
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
@@ -31,6 +29,10 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+)
+
+const (
+	Annotation = "global-accelerator.alpha.wildlife.io"
 )
 
 // EndpointGroupReconciler reconciles a EndpointGroup object
@@ -73,6 +75,8 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
+	services := make(map[string][]corev1.Service)
+
 	for _, cluster := range clusterGroup.Spec.Clusters {
 		config, err := RESTConfig(ctx, r.Client, cluster.CredentialsRef)
 		if err != nil {
@@ -84,14 +88,18 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, errors.Errorf("failed to instanciate remote client for Cluster %s", cluster.Name)
 		}
 
-		services := &corev1.ServiceList{}
-		err = remoteClient.List(ctx, services)
+		serviceList := &corev1.ServiceList{}
+		err = remoteClient.List(ctx, serviceList)
 		if err != nil {
 			return ctrl.Result{}, errors.Errorf("failed to list services in remote cluster %s", cluster.Name)
 		}
-		fmt.Println(services)
+		for _, service := range serviceList.Items {
+			if value, ok := service.Annotations[Annotation]; ok && value == "true" && service.Spec.Type == "LoadBalancer" {
+				services[cluster.Name] = append(services[cluster.Name], service)
+			}
+		}
 	}
-
+	// TODO: Create the EndpointGroup CR based on the desired state calculated
 	return ctrl.Result{}, nil
 }
 
