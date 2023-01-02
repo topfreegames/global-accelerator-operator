@@ -24,9 +24,13 @@ if [[ $? -ne 0 ]]; then
 fi
 
 SECRET=$(kubectl --context="$2" -n kube-system get sa global-accelerator-operator -o json 2> /dev/null | jq -r ".secrets[0].name")
-TOKEN=$(kubectl --context="$2" -n kube-system get secret "${SECRET}" -o jsonpath='{.data.token}' 2> /dev/null | base64 --decode)
+if [ "${SECRET}" == "null" ]; then
+  TOKEN=$(kubectl --context="$2" create -n kube-system token global-accelerator-operator 2> /dev/null)
+else
+  TOKEN=$(kubectl --context="$2" -n kube-system get secret "${SECRET}" -o jsonpath='{.data.token}' 2> /dev/null | base64 --decode)
+fi
 SERVER=$(kubectl config view | yq ".clusters.[] | select(.name == \"${2}\") | .cluster.server")
-CABASE64=$(openssl s_client -showcerts -connect $(echo "$SERVER" | cut -d/ -f3-):443 < /dev/null 2> /dev/null | awk '/1 s:\/CN=kubernetes/,/-----END CERTIFICATE-----/' | tail +3 | base64)
+CABASE64=$(kubectl config view --raw | yq ".clusters.[] | select(.name == \"${2}\") | .cluster.certificate-authority-data")
 KUBECONFIG=$(export SERVER REMOTECLUSTER=$2 CABASE64 TOKEN; < "$( dirname -- "$0"; )/kubeconfig.tpl" envsubst)
 
 VALUES=( "TOKEN=$TOKEN" "SERVER=$SERVER" "CA=$CABASE64" "KUBECONFIG=$KUBECONFIG" )
