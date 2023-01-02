@@ -1,0 +1,12 @@
+apiVersion: globalaccelerator.aws.wildlife.io/v1alpha1
+kind: EndpointGroup
+metadata:
+  labels:
+    app.kubernetes.io/name: endpointgroup
+    app.kubernetes.io/instance: endpointgroup-sample
+    app.kubernetes.io/part-of: global-accelerator-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: global-accelerator-operator
+  name: endpointgroup-sample
+spec:
+  # TODO(user): Add fields here

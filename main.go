@@ -32,7 +32,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/v1alpha1"
+	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
+	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/infrastructure.wildlife.io/v1alpha1"
 	"github.com/topfreegames/global-accelerator-operator/controllers"
 	//+kubebuilder:scaffold:imports
 )
@@ -47,6 +48,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(infrastructurewildlifeiov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(globalacceleratorawswildlifeiov1alpha1.AddToScheme(scheme))
 	//+kubebuilder:scaffold:scheme
 }
 

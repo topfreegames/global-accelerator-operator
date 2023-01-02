@@ -17,14 +17,15 @@ limitations under the License.
 package controllers
 
 import (
+	"time"
+
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"time"
 
-	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/v1alpha1"
+	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/infrastructure.wildlife.io/v1alpha1"
 )
 
 var _ = Describe("EndpointGroup controller", func() {

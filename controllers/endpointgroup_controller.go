@@ -18,21 +18,28 @@ package controllers
 
 import (
 	"context"
+
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/v1alpha1"
+	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
+	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/infrastructure.wildlife.io/v1alpha1"
+
 	"k8s.io/apimachinery/pkg/runtime"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 const (
-	Annotation = "global-accelerator.alpha.wildlife.io"
+	EnableAnnotation = "global-accelerator.alpha.wildlife.io/enable"
+	GroupAnnotation  = "global-accelerator.alpha.wildlife.io/group"
 )
 
 // EndpointGroupReconciler reconciles a EndpointGroup object
@@ -63,6 +70,22 @@ func RESTConfig(ctx context.Context, kubeClient client.Client, credentialsRef co
 	return config, nil
 }
 
+func isEnabled(service *corev1.Service) bool {
+	if service.Spec.Type != corev1.ServiceTypeLoadBalancer {
+		return false
+	}
+
+	if value, ok := service.Annotations[EnableAnnotation]; !ok || value != "true" {
+		return false
+	}
+
+	if _, ok := service.Annotations[GroupAnnotation]; !ok {
+		return false
+	}
+
+	return true
+}
+
 //+kubebuilder:rbac:groups=infrastructure.wildlife.io,resources=clustergroups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=infrastructure.wildlife.io,resources=clustergroups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=infrastructure.wildlife.io,resources=clustergroups/finalizers,verbs=update
@@ -75,7 +98,7 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		return ctrl.Result{}, err
 	}
 
-	services := make(map[string][]corev1.Service)
+	groupedServices := make(map[string][]corev1.Service)
 
 	for _, cluster := range clusterGroup.Spec.Clusters {
 		config, err := RESTConfig(ctx, r.Client, cluster.CredentialsRef)
@@ -94,12 +117,36 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return ctrl.Result{}, errors.Errorf("failed to list services in remote cluster %s", cluster.Name)
 		}
 		for _, service := range serviceList.Items {
-			if value, ok := service.Annotations[Annotation]; ok && value == "true" && service.Spec.Type == "LoadBalancer" {
-				services[cluster.Name] = append(services[cluster.Name], service)
+			if isEnabled(&service) {
+				groupedServices[service.Annotations[GroupAnnotation]] = append(groupedServices[service.Annotations[GroupAnnotation]], service)
 			}
 		}
 	}
 	// TODO: Create the EndpointGroup CR based on the desired state calculated
+
+	for group, services := range groupedServices {
+		endpointGroup := &globalacceleratorawswildlifeiov1alpha1.EndpointGroup{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      group,
+				Namespace: "global-accelerator-operator-system",
+			},
+			Spec: globalacceleratorawswildlifeiov1alpha1.EndpointGroupSpec{
+				Hostnames: []string{},
+			},
+		}
+
+		for _, service := range services {
+			endpointGroup.Spec.Hostnames = append(endpointGroup.Spec.Hostnames, service.Status.LoadBalancer.Ingress[0].Hostname)
+		}
+
+		_, err := controllerutil.CreateOrUpdate(ctx, r.Client, endpointGroup, func() error {
+			return nil
+		})
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
 	return ctrl.Result{}, nil
 }
 
