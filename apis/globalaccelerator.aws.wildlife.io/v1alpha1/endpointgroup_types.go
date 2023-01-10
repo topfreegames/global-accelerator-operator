@@ -21,10 +21,14 @@ import (
 )
 
 type EndpointGroupSpec struct {
-	Hostnames []string `json:"loadBalancers,omitempty"`
+	DNSNames []string `json:"dnsNames,omitempty"`
 }
 
-type EndpointGroupStatus struct{}
+type EndpointGroupStatus struct {
+	GlobalAcceleratorARN string `json:"globalAcceleratorARN,omitempty"`
+	ListenerARN          string `json:"listenerARN,omitempty"`
+	EndpointGroupARN     string `json:"endpointGroupARN,omitempty"`
+}
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
