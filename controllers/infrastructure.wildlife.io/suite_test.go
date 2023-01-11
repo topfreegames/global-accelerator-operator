@@ -19,7 +19,6 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -110,7 +109,6 @@ func createKubeconfigSecret(clusterName string, cfg *rest.Config) {
 
 var _ = BeforeSuite(func() {
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
-	Expect(os.Setenv("KUBEBUILDER_ASSETS", "../../bin/k8s/1.23.5-darwin-amd64")).To(Succeed())
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
