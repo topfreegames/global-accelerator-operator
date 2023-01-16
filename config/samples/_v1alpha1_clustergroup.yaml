@@ -1,0 +1,25 @@
+apiVersion: infrastructure.wildlife.io/v1alpha1
+kind: ClusterGroup
+metadata:
+  labels:
+    app.kubernetes.io/name: clustergroup
+    app.kubernetes.io/instance: clustergroup-sample
+    app.kubernetes.io/part-of: global-accelerator-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: global-accelerator-operator
+  name: clustergroup-sample
+spec:
+  spec:
+    clusters:
+      - credentialsRef:
+          name: remote-cluster-a-kubeconfig
+          namespace: global-accelerator-operator-system
+        name: remote-cluster-a
+      - credentialsRef:
+          name: remote-cluster-b-kubeconfig
+          namespace: global-accelerator-operator-system
+        name: remote-cluster-b
+      - credentialsRef:
+          name: remote-cluster-c-kubeconfig
+          namespace: global-accelerator-operator-system
+        name: remote-cluster-c
