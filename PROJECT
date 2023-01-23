@@ -11,6 +11,14 @@ resources:
   controller: true
   domain: infrastructure.wildlife.io
   kind: ClusterGroup
-  path: github.com/topfreegames/global-accelerator-operator/apis/v1alpha1
+  path: github.com/topfreegames/global-accelerator-operator/apis/infrastructure.wildlife.io/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+    namespaced: true
+  domain: aws.wildlife.io
+  group: globalaccelerator
+  kind: EndpointGroup
+  path: github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1
   version: v1alpha1
 version: "3"

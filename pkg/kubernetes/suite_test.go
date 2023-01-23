@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package controllers
+package kubernetes
 
 import (
 	"context"
@@ -24,9 +24,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	"path/filepath"
-	ctrl "sigs.k8s.io/controller-runtime"
 	"testing"
-	"time"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -37,8 +35,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
-
-	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/v1alpha1"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -46,24 +42,23 @@ import (
 // http://onsi.github.io/ginkgo/ to learn more about Ginkgo.
 
 var (
-	ctx                    context.Context
-	cancel                 context.CancelFunc
-	reconciliationInterval = 10 * time.Second
-	managementCfg          *rest.Config
-	managementK8sClient    client.Client
-	managementTestEnv      *envtest.Environment
-	remoteCfgA             *rest.Config
-	remoteK8sClientA       client.Client
-	remoteTestEnvA         *envtest.Environment
-	remoteCfgB             *rest.Config
-	remoteK8sClientB       client.Client
-	remoteTestEnvB         *envtest.Environment
+	ctx                 context.Context
+	cancel              context.CancelFunc
+	managementCfg       *rest.Config
+	managementK8sClient client.Client
+	managementTestEnv   *envtest.Environment
+	remoteCfgA          *rest.Config
+	remoteK8sClientA    client.Client
+	remoteTestEnvA      *envtest.Environment
+	remoteCfgB          *rest.Config
+	remoteK8sClientB    client.Client
+	remoteTestEnvB      *envtest.Environment
 )
 
-func TestAPIs(t *testing.T) {
+func TestKubernetes(t *testing.T) {
 	RegisterFailHandler(Fail)
 
-	RunSpecs(t, "Controller Suite")
+	RunSpecs(t, "Kubernetes Suite")
 }
 
 func createKubeconfigSecret(clusterName string, cfg *rest.Config) {
@@ -111,25 +106,24 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	By("bootstrapping test environment")
-	managementTestEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
-		ErrorIfCRDPathMissing: true,
-	}
-
-	remoteTestEnvA = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
-		ErrorIfCRDPathMissing: true,
-	}
-
-	remoteTestEnvB = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "config", "crd", "bases")},
-		ErrorIfCRDPathMissing: true,
-	}
-
 	var err error
+	managementTestEnv = &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+	}
+
 	managementCfg, err = managementTestEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(managementCfg).NotTo(BeNil())
+
+	managementK8sClient, err = client.New(managementCfg, client.Options{Scheme: scheme.Scheme})
+	Expect(err).NotTo(HaveOccurred())
+	Expect(managementK8sClient).NotTo(BeNil())
+
+	remoteTestEnvA = &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+	}
 
 	remoteCfgA, err = remoteTestEnvA.Start()
 	Expect(err).NotTo(HaveOccurred())
@@ -139,7 +133,12 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(remoteK8sClientA).NotTo(BeNil())
 
-	remoteCfgB, err = remoteTestEnvA.Start()
+	remoteTestEnvB = &envtest.Environment{
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		ErrorIfCRDPathMissing: true,
+	}
+
+	remoteCfgB, err = remoteTestEnvB.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(remoteCfgB).NotTo(BeNil())
 
@@ -147,77 +146,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(remoteK8sClientB).NotTo(BeNil())
 
-	serviceRemoteA := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-service-a",
-			Namespace: metav1.NamespaceDefault,
-			Annotations: map[string]string{
-				"global-accelerator.alpha.wildlife.io": "true",
-			},
-		},
-		Spec: corev1.ServiceSpec{
-			Ports: []corev1.ServicePort{
-				{
-					Protocol: "TCP",
-					Port:     80,
-					Name:     "http",
-				},
-			},
-			Type: corev1.ServiceTypeLoadBalancer,
-		},
-	}
-	Expect(remoteK8sClientA.Create(ctx, serviceRemoteA)).Should(Succeed())
-
-	serviceRemoteB := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-service-b",
-			Namespace: metav1.NamespaceDefault,
-			Annotations: map[string]string{
-				Annotation: "true",
-			},
-		},
-		Spec: corev1.ServiceSpec{
-			Ports: []corev1.ServicePort{
-				{
-					Protocol: "TCP",
-					Port:     80,
-					Name:     "http",
-				},
-			},
-			Type: corev1.ServiceTypeLoadBalancer,
-		},
-	}
-	Expect(remoteK8sClientB.Create(ctx, serviceRemoteB)).Should(Succeed())
-
-	err = infrastructurewildlifeiov1alpha1.AddToScheme(scheme.Scheme)
-	Expect(err).NotTo(HaveOccurred())
-
 	//+kubebuilder:scaffold:scheme
-
-	managementK8sClient, err = client.New(managementCfg, client.Options{Scheme: scheme.Scheme})
-	Expect(err).NotTo(HaveOccurred())
-	Expect(managementK8sClient).NotTo(BeNil())
-
-	createKubeconfigSecret("remote-cluster-a", remoteCfgA)
-	createKubeconfigSecret("remote-cluster-b", remoteCfgB)
-
-	k8sManager, err := ctrl.NewManager(managementCfg, ctrl.Options{
-		Scheme:     scheme.Scheme,
-		SyncPeriod: &reconciliationInterval,
-	})
-	Expect(err).ToNot(HaveOccurred())
-
-	err = (&EndpointGroupReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
-	}).SetupWithManager(k8sManager)
-	Expect(err).ToNot(HaveOccurred())
-
-	go func() {
-		defer GinkgoRecover()
-		err = k8sManager.Start(ctx)
-		Expect(err).ToNot(HaveOccurred(), "failed to run manager")
-	}()
 
 })
 
