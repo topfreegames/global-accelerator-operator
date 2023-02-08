@@ -48,7 +48,7 @@ type EndpointGroupReconciler struct {
 	NewELBClientFactory               func(cfg aws.Config) elb.ELBClient
 }
 
-func getCurrentGlobalAccelerator(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient) (*globalacceleratortypes.Accelerator, error) {
+func getOrCreateCurrentGlobalAccelerator(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient) (*globalacceleratortypes.Accelerator, error) {
 	currentGlobalAccelerator, err := globalaccelerator.GetCurrentGlobalAccelerator(ctx, globalAcceleratorClient)
 	if err != nil {
 		if errors.Is(err, globalaccelerator.ErrUnavailableGlobalAccelerator) {
@@ -109,7 +109,7 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	var globalAccelerator *globalacceleratortypes.Accelerator
 
 	if endpointGroup.Status.GlobalAcceleratorARN == "" {
-		globalAccelerator, err = getCurrentGlobalAccelerator(ctx, globalAcceleratorClient)
+		globalAccelerator, err = getOrCreateCurrentGlobalAccelerator(ctx, globalAcceleratorClient)
 		if err != nil {
 			return requeue5min, err
 		}

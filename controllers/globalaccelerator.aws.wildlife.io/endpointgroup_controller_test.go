@@ -171,7 +171,7 @@ func newFakeGlobalAcceleratorClient(tc testCase) *fakeglobalaccelerator.MockGlob
 	}
 }
 
-func TestGetCurrentGlobalAccelerator(t *testing.T) {
+func TestGetOrCreateCurrentGlobalAccelerator(t *testing.T) {
 	RegisterFailHandler(g.Fail)
 	g := NewWithT(t)
 
@@ -215,7 +215,7 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			fakeGlobalAcceleratorClient := newFakeGlobalAcceleratorClient(tc)
 
-			currentGlobalAccelerator, err := getCurrentGlobalAccelerator(context.TODO(), fakeGlobalAcceleratorClient)
+			currentGlobalAccelerator, err := getOrCreateCurrentGlobalAccelerator(context.TODO(), fakeGlobalAcceleratorClient)
 			if tc.expectedError {
 				g.Expect(err).Should(HaveOccurred())
 			} else {
