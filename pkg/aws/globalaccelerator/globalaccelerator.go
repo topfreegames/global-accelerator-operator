@@ -86,6 +86,7 @@ func GetCurrentGlobalAccelerator(ctx context.Context, globalAcceleratorClient Gl
 					if err != nil {
 						return nil, err
 					}
+					return nil, ErrUnavailableGlobalAccelerator
 				}
 			}
 		}
