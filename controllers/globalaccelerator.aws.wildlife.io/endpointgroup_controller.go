@@ -51,15 +51,15 @@ type EndpointGroupReconciler struct {
 func getCurrentGlobalAccelerator(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient) (*globalacceleratortypes.Accelerator, error) {
 	currentGlobalAccelerator, err := globalaccelerator.GetCurrentGlobalAccelerator(ctx, globalAcceleratorClient)
 	if err != nil {
-		switch {
-		case errors.Is(err, globalaccelerator.ErrUnavailableGlobalAccelerator):
+		if errors.Is(err, globalaccelerator.ErrUnavailableGlobalAccelerator) {
 			createdGlobalAccelerator, err := globalaccelerator.CreateGlobalAccelerator(ctx, globalAcceleratorClient)
 			if err != nil {
 				return nil, err
 			}
 			currentGlobalAccelerator = createdGlobalAccelerator
-		default:
+		} else {
 			return nil, err
+
 		}
 	}
 	return currentGlobalAccelerator, nil
