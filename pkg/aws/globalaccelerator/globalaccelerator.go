@@ -3,9 +3,11 @@ package globalaccelerator
 import (
 	"context"
 	"fmt"
+	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	globalacceleratortypes "github.com/aws/aws-sdk-go-v2/service/globalaccelerator/types"
 	"github.com/pkg/errors"
-	"github.com/topfreegames/global-accelerator-operator/pkg/aws/elb"
+	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
+	"golang.org/x/exp/slices"
 	"k8s.io/apimachinery/pkg/util/rand"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -44,7 +46,7 @@ func isGlobalAcceleratorAvailable(ctx context.Context, globalAcceleratorClient G
 	if err != nil {
 		return false, err
 	}
-	// Default quota for listeners
+	// TODO: Verify for more quota values
 	if len(listenersOutput.Listeners) < 10 {
 		return true, nil
 	}
@@ -130,16 +132,20 @@ func GetListenersFromGlobalAccelerator(ctx context.Context, globalAcceleratorCli
 	return listenersOutput.Listeners, nil
 }
 
-func CreateListener(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, globalAcceleratorARN string, listenerPort int) (*globalacceleratortypes.Listener, error) {
+func CreateListener(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, globalAcceleratorARN string, listenerPorts []int32) (*globalacceleratortypes.Listener, error) {
+
+	portRanges := []globalacceleratortypes.PortRange{}
+	for _, listenerPort := range listenerPorts {
+		portRanges = append(portRanges, globalacceleratortypes.PortRange{
+			FromPort: aws.Int32(listenerPort),
+			ToPort:   aws.Int32(listenerPort),
+		})
+	}
+
 	createdListener, err := globalAcceleratorClient.CreateListener(ctx, &globalacceleratorsdk.CreateListenerInput{
 		AcceleratorArn: aws.String(globalAcceleratorARN),
 		Protocol:       globalacceleratortypes.ProtocolTcp,
-		PortRanges: []globalacceleratortypes.PortRange{
-			{
-				FromPort: aws.Int32(int32(listenerPort)),
-				ToPort:   aws.Int32(int32(listenerPort)),
-			},
-		},
+		PortRanges:     portRanges,
 	})
 	if err != nil {
 		return nil, err
@@ -160,26 +166,41 @@ func checkIfListenerPortIsAvailable(listeners []globalacceleratortypes.Listener,
 	return true
 }
 
-// This shouldn't become a infinite loop since there is a limit for the number
-// of listeners per GA
-func GetAvailableListenerPort(listeners []globalacceleratortypes.Listener) int {
+func GetAvailableListenerPort(listeners []globalacceleratortypes.Listener, listenerPorts []int32) (*int, error) {
 	var listenerPort int
-
-	var availablePort bool
-	for ok := true; ok; ok = !availablePort {
-		listenerPort = rand.IntnRange(49152, 65535)
-		availablePort = checkIfListenerPortIsAvailable(listeners, listenerPort)
+	// high ports from 49152 to 65535
+	for i := 49152; i < 65535; i++ {
+		listenerPort = i
+		if slices.Contains(listenerPorts, int32(listenerPort)) {
+			continue
+		}
+		if !checkIfListenerPortIsAvailable(listeners, listenerPort) {
+			continue
+		}
+		return &listenerPort, nil
 	}
 
-	return listenerPort
+	return nil, errors.New("failed to get available listener port")
+}
+
+func GetPortOverrides(endpointGroup *globalacceleratorawswildlifeiov1alpha1.EndpointGroup) []globalacceleratortypes.PortOverride {
+	portOverrides := []globalacceleratortypes.PortOverride{}
+	for _, endpointGroupPort := range endpointGroup.Status.Ports {
+		portOverrides = append(portOverrides, globalacceleratortypes.PortOverride{
+			ListenerPort: aws.Int32(endpointGroupPort.ListenerPort),
+			EndpointPort: aws.Int32(endpointGroupPort.EndpointPort),
+		})
+	}
+	return portOverrides
 }
 
 // TODO: An EndpointGroup can only belong to one region, we should infer the region or enable a way to define
-func CreateEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, listenerARN string, endpointConfigurations []globalacceleratortypes.EndpointConfiguration) (*globalacceleratortypes.EndpointGroup, error) {
+func CreateEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, listenerARN string, portOverrides []globalacceleratortypes.PortOverride, endpointConfigurations []globalacceleratortypes.EndpointConfiguration) (*globalacceleratortypes.EndpointGroup, error) {
 	createEndpointGroupOutput, err := globalAcceleratorClient.CreateEndpointGroup(ctx, &globalacceleratorsdk.CreateEndpointGroupInput{
 		ListenerArn:            &listenerARN,
 		EndpointGroupRegion:    aws.String("us-east-1"),
 		EndpointConfigurations: endpointConfigurations,
+		PortOverrides:          portOverrides,
 	})
 	if err != nil {
 		return nil, err
@@ -187,10 +208,12 @@ func CreateEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcce
 	return createEndpointGroupOutput.EndpointGroup, nil
 }
 
-func UpdateEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, endpointGroupARN string, endpointConfigurations []globalacceleratortypes.EndpointConfiguration) (*globalacceleratortypes.EndpointGroup, error) {
+func UpdateEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, endpointGroupARN string, portOverrides []globalacceleratortypes.PortOverride, endpointConfigurations []globalacceleratortypes.EndpointConfiguration) (*globalacceleratortypes.EndpointGroup, error) {
+
 	updateEndpointGroupOutput, err := globalAcceleratorClient.UpdateEndpointGroup(ctx, &globalacceleratorsdk.UpdateEndpointGroupInput{
 		EndpointGroupArn:       aws.String(endpointGroupARN),
 		EndpointConfigurations: endpointConfigurations,
+		PortOverrides:          portOverrides,
 	})
 	if err != nil {
 		return nil, err
@@ -199,16 +222,13 @@ func UpdateEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcce
 
 }
 
-func GetEndpointGroupConfigurations(ctx context.Context, elbClient elb.ELBClient, dnsNames []string) ([]globalacceleratortypes.EndpointConfiguration, error) {
+func GetEndpointGroupConfigurations(loadBalancers []elbv2types.LoadBalancer) []globalacceleratortypes.EndpointConfiguration {
 	endpoints := []globalacceleratortypes.EndpointConfiguration{}
-	for _, dnsName := range dnsNames {
-		loadBalancerARN, err := elb.GetLoadBalancerARNFromDNS(ctx, elbClient, dnsName)
-		if err != nil {
-			return nil, err
-		}
+	for _, loadBalancer := range loadBalancers {
 		endpoints = append(endpoints, globalacceleratortypes.EndpointConfiguration{
-			EndpointId: aws.String(loadBalancerARN),
+			EndpointId: loadBalancer.LoadBalancerArn,
 		})
 	}
-	return endpoints, nil
+
+	return endpoints
 }

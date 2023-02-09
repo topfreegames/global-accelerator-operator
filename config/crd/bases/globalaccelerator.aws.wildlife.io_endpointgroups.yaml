@@ -46,6 +46,17 @@ spec:
                 type: string
               listenerARN:
                 type: string
+              ports:
+                items:
+                  properties:
+                    endpointPort:
+                      format: int32
+                      type: integer
+                    listenerPort:
+                      format: int32
+                      type: integer
+                  type: object
+                type: array
             type: object
         type: object
     served: true

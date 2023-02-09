@@ -4,14 +4,13 @@ import (
 	"context"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	globalacceleratorsdk "github.com/aws/aws-sdk-go-v2/service/globalaccelerator"
 	globalacceleratortypes "github.com/aws/aws-sdk-go-v2/service/globalaccelerator/types"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/pkg/errors"
-	fakeelb "github.com/topfreegames/global-accelerator-operator/pkg/aws/elb/fake"
+	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
 	fakeglobalaccelerator "github.com/topfreegames/global-accelerator-operator/pkg/aws/globalaccelerator/fake"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"strings"
@@ -438,24 +437,45 @@ func TestCreateListener(t *testing.T) {
 	RegisterFailHandler(Fail)
 	g := NewWithT(t)
 
+	type expectedListener struct {
+		listenerARN string
+		ports       []globalacceleratortypes.PortRange
+	}
+
 	testCases := []struct {
 		description          string
 		globalAcceleratorARN string
-		listenerPort         int
-		expectedListener     string
-		expectedError        bool
+		listenerPort         []int32
+		expectedListener     expectedListener
+		expectedError        error
 		createListenerError  error
 	}{
 		{
 			description:          "should return error when failed to create listener",
-			createListenerError:  errors.New("failed do create listener"),
+			createListenerError:  errors.New("failed to create listener"),
 			globalAcceleratorARN: "arn:aws:globalaccelerator::xxx:accelerator/yyy",
-			expectedError:        true,
+			expectedError:        errors.New("failed to create listener"),
 		},
 		{
-			description:          "should successfully create listener",
+			description: "should successfully create listener",
+			listenerPort: []int32{
+				80,
+				443,
+			},
 			globalAcceleratorARN: "arn:aws:globalaccelerator::xxx:accelerator/yyy",
-			expectedListener:     "arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz",
+			expectedListener: expectedListener{
+				listenerARN: "arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz",
+				ports: []globalacceleratortypes.PortRange{
+					{
+						FromPort: aws.Int32(80),
+						ToPort:   aws.Int32(80),
+					},
+					{
+						FromPort: aws.Int32(443),
+						ToPort:   aws.Int32(443),
+					},
+				},
+			},
 		},
 	}
 	for _, tc := range testCases {
@@ -468,16 +488,18 @@ func TestCreateListener(t *testing.T) {
 					return &globalacceleratorsdk.CreateListenerOutput{
 						Listener: &globalacceleratortypes.Listener{
 							ListenerArn: aws.String(fmt.Sprintf("%s/listener/zzz", *input.AcceleratorArn)),
+							PortRanges:  input.PortRanges,
 						},
 					}, nil
 				},
 			}
 			listener, err := CreateListener(context.TODO(), fakeGlobalAcceleratorClient, tc.globalAcceleratorARN, tc.listenerPort)
-			if tc.expectedError {
-				g.Expect(err).Should(HaveOccurred())
+			if tc.expectedError != nil {
+				g.Expect(err.Error()).To(BeEquivalentTo(tc.expectedError.Error()))
 			} else {
 				g.Expect(err).ShouldNot(HaveOccurred())
-				g.Expect(*listener.ListenerArn).To(BeEquivalentTo(tc.expectedListener))
+				g.Expect(*listener.ListenerArn).To(BeEquivalentTo(tc.expectedListener.listenerARN))
+				g.Expect(listener.PortRanges).To(BeEquivalentTo(tc.expectedListener.ports))
 			}
 		})
 	}
@@ -544,6 +566,117 @@ func TestCheckIfListenerPortIsAvailable(t *testing.T) {
 	}
 }
 
+func TestGetAvailableListenerPort(t *testing.T) {
+	RegisterFailHandler(Fail)
+	g := NewWithT(t)
+
+	testCases := []struct {
+		description    string
+		listenerPorts  []int32
+		expectedOutput int
+		expectedError  error
+		listeners      []globalacceleratortypes.Listener
+	}{
+		{
+			description:    "should return the first high port",
+			expectedOutput: 49152,
+		},
+		{
+			description: "should return the first available high port",
+			listenerPorts: []int32{
+				49152,
+				49153,
+			},
+			expectedOutput: 49154,
+		},
+		{
+			description: "should return error when no port is available",
+			listenerPorts: []int32{
+				49152,
+				49153,
+			},
+			expectedError: errors.New("failed to get available listener port"),
+			listeners: []globalacceleratortypes.Listener{
+				{
+					PortRanges: []globalacceleratortypes.PortRange{
+						{
+							FromPort: aws.Int32(49154),
+							ToPort:   aws.Int32(65534),
+						},
+					},
+				},
+			},
+		},
+		{
+			description:   "should return the next available port after the listeners",
+			listenerPorts: []int32{},
+			listeners: []globalacceleratortypes.Listener{
+				{
+					PortRanges: []globalacceleratortypes.PortRange{
+						{
+							FromPort: aws.Int32(49152),
+							ToPort:   aws.Int32(49152),
+						},
+						{
+							FromPort: aws.Int32(49153),
+							ToPort:   aws.Int32(49153),
+						},
+					},
+				},
+			},
+			expectedOutput: 49154,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			port, err := GetAvailableListenerPort(tc.listeners, tc.listenerPorts)
+			if tc.expectedError != nil {
+				g.Expect(err.Error()).To(BeEquivalentTo(tc.expectedError.Error()))
+			} else {
+				g.Expect(err).ToNot(HaveOccurred())
+				g.Expect(port).To(BeEquivalentTo(&tc.expectedOutput))
+			}
+		})
+	}
+}
+
+func TestGetPortOverrides(t *testing.T) {
+	RegisterFailHandler(Fail)
+	g := NewWithT(t)
+
+	testCases := []struct {
+		description    string
+		endpointGroup  *globalacceleratorawswildlifeiov1alpha1.EndpointGroup
+		expectedOutput []globalacceleratortypes.PortOverride
+	}{
+		{
+			description: "should return the equivalent PortOverride",
+			endpointGroup: &globalacceleratorawswildlifeiov1alpha1.EndpointGroup{
+				Status: globalacceleratorawswildlifeiov1alpha1.EndpointGroupStatus{
+					Ports: []globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts{
+						{
+							ListenerPort: 49152,
+							EndpointPort: 80,
+						},
+					},
+				},
+			},
+			expectedOutput: []globalacceleratortypes.PortOverride{
+				{
+					ListenerPort: aws.Int32(49152),
+					EndpointPort: aws.Int32(80),
+				},
+			},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			portOverride := GetPortOverrides(tc.endpointGroup)
+			g.Expect(portOverride).To(BeEquivalentTo(tc.expectedOutput))
+		})
+	}
+}
+
 func TestCreateEndpointGroup(t *testing.T) {
 	RegisterFailHandler(Fail)
 	g := NewWithT(t)
@@ -582,7 +715,7 @@ func TestCreateEndpointGroup(t *testing.T) {
 					}, nil
 				},
 			}
-			endpointGroup, err := CreateEndpointGroup(context.TODO(), fakeGlobalAcceleratorClient, tc.listenerARN, []globalacceleratortypes.EndpointConfiguration{})
+			endpointGroup, err := CreateEndpointGroup(context.TODO(), fakeGlobalAcceleratorClient, tc.listenerARN, []globalacceleratortypes.PortOverride{}, []globalacceleratortypes.EndpointConfiguration{})
 			if tc.expectedError {
 				g.Expect(err).Should(HaveOccurred())
 			} else {
@@ -668,7 +801,7 @@ func TestUpdateEndpointGroup(t *testing.T) {
 					}, nil
 				},
 			}
-			endpointGroup, err := UpdateEndpointGroup(context.TODO(), fakeGlobalAcceleratorClient, tc.endpointGroupARN, tc.endpointConfigurations)
+			endpointGroup, err := UpdateEndpointGroup(context.TODO(), fakeGlobalAcceleratorClient, tc.endpointGroupARN, []globalacceleratortypes.PortOverride{}, tc.endpointConfigurations)
 			if tc.expectedError {
 				g.Expect(err).Should(HaveOccurred())
 			} else {
@@ -685,36 +818,11 @@ func TestGetEndpointGroupConfigurations(t *testing.T) {
 
 	testCases := []struct {
 		description                        string
-		expectedError                      bool
 		loadBalancers                      []types.LoadBalancer
-		dnsNames                           []string
 		expectedEndpointGroupConfiguration []globalacceleratortypes.EndpointConfiguration
 	}{
 		{
-			description: "should return error when some at least one LB can't be found ",
-			dnsNames: []string{
-				"a.elb.us-east-1.amazonaws.com",
-				"b.elb.us-east-1.amazonaws.com",
-				"c.elb.us-east-1.amazonaws.com",
-			},
-			loadBalancers: []types.LoadBalancer{
-				{
-					DNSName:         aws.String("a.elb.us-east-1.amazonaws.com"),
-					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/aaa"),
-				},
-				{
-					DNSName:         aws.String("b.elb.us-east-1.amazonaws.com"),
-					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/bbb"),
-				},
-			},
-			expectedError: true,
-		},
-		{
 			description: "should successfully return the endpointConfiguration list",
-			dnsNames: []string{
-				"a.elb.us-east-1.amazonaws.com",
-				"b.elb.us-east-1.amazonaws.com",
-			},
 			loadBalancers: []types.LoadBalancer{
 				{
 					DNSName:         aws.String("a.elb.us-east-1.amazonaws.com"),
@@ -738,21 +846,8 @@ func TestGetEndpointGroupConfigurations(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-
-			fakeELBClient := &fakeelb.MockELBClient{
-				MockDescribeLoadBalancers: func(ctx context.Context, input *elasticloadbalancingv2.DescribeLoadBalancersInput, opts []func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeLoadBalancersOutput, error) {
-					return &elasticloadbalancingv2.DescribeLoadBalancersOutput{
-						LoadBalancers: tc.loadBalancers,
-					}, nil
-				},
-			}
-			endpointConfigurations, err := GetEndpointGroupConfigurations(context.TODO(), fakeELBClient, tc.dnsNames)
-			if tc.expectedError {
-				g.Expect(err).Should(HaveOccurred())
-			} else {
-				g.Expect(err).ShouldNot(HaveOccurred())
-				g.Expect(endpointConfigurations).To(BeEquivalentTo(tc.expectedEndpointGroupConfiguration))
-			}
+			endpointConfigurations := GetEndpointGroupConfigurations(tc.loadBalancers)
+			g.Expect(endpointConfigurations).To(BeEquivalentTo(tc.expectedEndpointGroupConfiguration))
 		})
 	}
 }

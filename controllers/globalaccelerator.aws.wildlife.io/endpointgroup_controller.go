@@ -59,20 +59,26 @@ func getOrCreateCurrentGlobalAccelerator(ctx context.Context, globalAcceleratorC
 			currentGlobalAccelerator = createdGlobalAccelerator
 		} else {
 			return nil, err
-
 		}
 	}
 	return currentGlobalAccelerator, nil
 }
 
-func createListener(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient, globalAcceleratorARN string) (*globalacceleratortypes.Listener, error) {
+func createListener(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient, globalAcceleratorARN string, numberOfPorts int) (*globalacceleratortypes.Listener, error) {
 	listeners, err := globalaccelerator.GetListenersFromGlobalAccelerator(ctx, globalAcceleratorClient, globalAcceleratorARN)
 	if err != nil {
 		return nil, err
 	}
 
-	listenerPort := globalaccelerator.GetAvailableListenerPort(listeners)
-	listener, err := globalaccelerator.CreateListener(ctx, globalAcceleratorClient, globalAcceleratorARN, listenerPort)
+	listenerPorts := []int32{}
+	for i := 0; i < numberOfPorts; i++ {
+		listenerPort, err := globalaccelerator.GetAvailableListenerPort(listeners, listenerPorts)
+		if err != nil {
+			return nil, err
+		}
+		listenerPorts = append(listenerPorts, int32(*listenerPort))
+	}
+	listener, err := globalaccelerator.CreateListener(ctx, globalAcceleratorClient, globalAcceleratorARN, listenerPorts)
 	if err != nil {
 		return nil, err
 	}
@@ -104,7 +110,6 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 	if err != nil {
 		return requeue5min, err
 	}
-	elbClient := r.NewELBClientFactory(*cfg)
 
 	var globalAccelerator *globalacceleratortypes.Accelerator
 
@@ -126,29 +131,50 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 		}
 	}
 
+	elbClient := r.NewELBClientFactory(*cfg)
+
+	loadBalancers, err := elb.GetLoadBalancersFromDNS(ctx, elbClient, endpointGroup.Spec.DNSNames)
+	if err != nil {
+		return requeue5min, err
+	}
+
+	//TODO: Validate that all loadBalances uses the same ports
+	loadBalancerPorts, err := elb.GetLoadBalancerPorts(ctx, elbClient, loadBalancers[0].LoadBalancerArn)
+	if err != nil {
+		return requeue5min, err
+	}
+
 	var listenerARN string
 	if endpointGroup.Status.ListenerARN == "" {
-		listener, err := createListener(ctx, globalAcceleratorClient, *globalAccelerator.AcceleratorArn)
+		listener, err := createListener(ctx, globalAcceleratorClient, *globalAccelerator.AcceleratorArn, len(loadBalancerPorts))
 		if err != nil {
 			return requeue5min, err
 		}
 		endpointGroup.Status.ListenerARN = *listener.ListenerArn
+
+		for i, _ := range listener.PortRanges {
+			endpointGroup.Status.Ports = append(endpointGroup.Status.Ports,
+				globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts{
+					ListenerPort: *listener.PortRanges[i].ToPort,
+					EndpointPort: loadBalancerPorts[i],
+				})
+		}
 		err = r.Status().Update(ctx, endpointGroup)
 		if err != nil {
 			return requeue5min, err
 		}
 		listenerARN = *listener.ListenerArn
 	} else {
+		// TODO: We should update the resource to ensure its state
 		listenerARN = endpointGroup.Status.ListenerARN
 	}
 
-	endpointConfigurations, err := globalaccelerator.GetEndpointGroupConfigurations(ctx, elbClient, endpointGroup.Spec.DNSNames)
-	if err != nil {
-		return requeue5min, err
-	}
+	endpointGroupConfigurations := globalaccelerator.GetEndpointGroupConfigurations(loadBalancers)
+
+	portOverrides := globalaccelerator.GetPortOverrides(endpointGroup)
 
 	if endpointGroup.Status.EndpointGroupARN == "" {
-		createdEndpointGroup, err := globalaccelerator.CreateEndpointGroup(ctx, globalAcceleratorClient, listenerARN, endpointConfigurations)
+		createdEndpointGroup, err := globalaccelerator.CreateEndpointGroup(ctx, globalAcceleratorClient, listenerARN, portOverrides, endpointGroupConfigurations)
 		if err != nil {
 			return requeue5min, err
 		}
@@ -158,7 +184,7 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 			return requeue5min, err
 		}
 	} else {
-		_, err = globalaccelerator.UpdateEndpointGroup(ctx, globalAcceleratorClient, endpointGroup.Status.EndpointGroupARN, endpointConfigurations)
+		_, err = globalaccelerator.UpdateEndpointGroup(ctx, globalAcceleratorClient, endpointGroup.Status.EndpointGroupARN, portOverrides, endpointGroupConfigurations)
 		if err != nil {
 			return requeue5min, err
 		}

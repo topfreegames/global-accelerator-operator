@@ -40,6 +40,7 @@ type testCase struct {
 	listeners                  []globalacceleratortypes.Listener
 	endpointGroups             []globalacceleratortypes.EndpointGroup
 	loadBalancers              []elasticloadbalancingv2types.LoadBalancer
+	loadBalancerListeners      []elasticloadbalancingv2types.Listener
 	createAcceleratorError     error
 	createListenerError        error
 	createEndpointGroupError   error
@@ -48,9 +49,11 @@ type testCase struct {
 	listListenersError         error
 	describeAcceleratorError   error
 	describeLoadBalancersError error
+	describeTargetGroupsError  error
 	expectedError              bool
 	expectedGlobalAccelerator  *string
 	expectedListener           *string
+	expectedPorts              []globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts
 	expectedEndpointGroup      *string
 }
 
@@ -132,6 +135,12 @@ func newFakeGlobalAcceleratorClient(tc testCase) *fakeglobalaccelerator.MockGlob
 			return &globalacceleratorsdk.CreateListenerOutput{
 				Listener: &globalacceleratortypes.Listener{
 					ListenerArn: aws.String(fmt.Sprintf("%s/listener/zzz", *input.AcceleratorArn)),
+					PortRanges: []globalacceleratortypes.PortRange{
+						{
+							FromPort: aws.Int32(49152),
+							ToPort:   aws.Int32(49152),
+						},
+					},
 				},
 			}, nil
 		},
@@ -237,6 +246,21 @@ func TestCreateListener(t *testing.T) {
 			expectedError:      true,
 		},
 		{
+			description: "should return error when no port is available in listener",
+			listeners: []globalacceleratortypes.Listener{
+				{
+					ListenerArn: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz"),
+					PortRanges: []globalacceleratortypes.PortRange{
+						{
+							FromPort: aws.Int32(49152),
+							ToPort:   aws.Int32(65535),
+						},
+					},
+				},
+			},
+			expectedError: true,
+		},
+		{
 			description:         "should return error when failing to create listener",
 			createListenerError: errors.New("failed to create listeners"),
 			expectedError:       true,
@@ -250,7 +274,7 @@ func TestCreateListener(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			fakeGlobalAcceleratorClient := newFakeGlobalAcceleratorClient(tc)
-			listener, err := createListener(context.TODO(), fakeGlobalAcceleratorClient, "arn:aws:globalaccelerator::xxx:accelerator/yyy")
+			listener, err := createListener(context.TODO(), fakeGlobalAcceleratorClient, "arn:aws:globalaccelerator::xxx:accelerator/yyy", 1)
 			if tc.expectedError {
 				g.Expect(err).Should(HaveOccurred())
 			} else {
@@ -306,25 +330,6 @@ func TestEndpointGroupReconciler(t *testing.T) {
 			expectedError:            true,
 		},
 		{
-			description: "should return error when failing to create listener",
-			k8sObjects: []client.Object{
-				&globalacceleratorawswildlifeiov1alpha1.EndpointGroup{
-					ObjectMeta: metav1.ObjectMeta{
-						Name:      "test-endpoint-group",
-						Namespace: metav1.NamespaceDefault,
-					},
-					Spec: globalacceleratorawswildlifeiov1alpha1.EndpointGroupSpec{
-						DNSNames: []string{
-							"a.elb.us-east-1.amazonaws.com",
-						},
-					},
-				},
-			},
-			createListenerError:       errors.New("failed to create listener"),
-			expectedError:             true,
-			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
-		},
-		{
 			description: "should return err when failing to describe lbs",
 			k8sObjects: []client.Object{
 				&globalacceleratorawswildlifeiov1alpha1.EndpointGroup{
@@ -342,7 +347,62 @@ func TestEndpointGroupReconciler(t *testing.T) {
 			describeLoadBalancersError: errors.New("failed to describe lbs"),
 			expectedError:              true,
 			expectedGlobalAccelerator:  aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
-			expectedListener:           aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz"),
+		},
+		{
+			description: "should return error when failing to get the endpoint group ports",
+			k8sObjects: []client.Object{
+				&globalacceleratorawswildlifeiov1alpha1.EndpointGroup{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-endpoint-group",
+						Namespace: metav1.NamespaceDefault,
+					},
+					Spec: globalacceleratorawswildlifeiov1alpha1.EndpointGroupSpec{
+						DNSNames: []string{
+							"a.elb.us-east-1.amazonaws.com",
+						},
+					},
+				},
+			},
+			loadBalancers: []elasticloadbalancingv2types.LoadBalancer{
+				{
+					DNSName:         aws.String("a.elb.us-east-1.amazonaws.com"),
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+				},
+			},
+			describeTargetGroupsError: errors.New("failed to describe targetGroups"),
+			expectedError:             true,
+			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
+		},
+		{
+			description: "should return error when failing to create listener",
+			k8sObjects: []client.Object{
+				&globalacceleratorawswildlifeiov1alpha1.EndpointGroup{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-endpoint-group",
+						Namespace: metav1.NamespaceDefault,
+					},
+					Spec: globalacceleratorawswildlifeiov1alpha1.EndpointGroupSpec{
+						DNSNames: []string{
+							"a.elb.us-east-1.amazonaws.com",
+						},
+					},
+				},
+			},
+			loadBalancers: []elasticloadbalancingv2types.LoadBalancer{
+				{
+					DNSName:         aws.String("a.elb.us-east-1.amazonaws.com"),
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+				},
+			},
+			loadBalancerListeners: []elasticloadbalancingv2types.Listener{
+				{
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+					Port:            aws.Int32(80),
+				},
+			},
+			createListenerError:       errors.New("failed to create listener"),
+			expectedError:             true,
+			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
 		},
 		{
 			description: "should return err when failing to create endpointGroup",
@@ -365,8 +425,20 @@ func TestEndpointGroupReconciler(t *testing.T) {
 					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
 				},
 			},
-			createEndpointGroupError:  errors.New("failed to create endpointGroup"),
-			expectedError:             true,
+			loadBalancerListeners: []elasticloadbalancingv2types.Listener{
+				{
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+					Port:            aws.Int32(80),
+				},
+			},
+			createEndpointGroupError: errors.New("failed to create endpointGroup"),
+			expectedError:            true,
+			expectedPorts: []globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts{
+				{
+					ListenerPort: 49152,
+					EndpointPort: 80,
+				},
+			},
 			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
 			expectedListener:          aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz"),
 		},
@@ -394,10 +466,22 @@ func TestEndpointGroupReconciler(t *testing.T) {
 					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
 				},
 			},
+			loadBalancerListeners: []elasticloadbalancingv2types.Listener{
+				{
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+					Port:            aws.Int32(80),
+				},
+			},
 			updateEndpointGroupError:  errors.New("failed to update endpointGroup"),
 			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
 			expectedListener:          aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz"),
-			expectedError:             true,
+			expectedPorts: []globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts{
+				{
+					ListenerPort: 49152,
+					EndpointPort: 80,
+				},
+			},
+			expectedError: true,
 		},
 		{
 			description: "should successfully create the endpointGroup",
@@ -418,6 +502,18 @@ func TestEndpointGroupReconciler(t *testing.T) {
 				{
 					DNSName:         aws.String("a.elb.us-east-1.amazonaws.com"),
 					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+				},
+			},
+			loadBalancerListeners: []elasticloadbalancingv2types.Listener{
+				{
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+					Port:            aws.Int32(80),
+				},
+			},
+			expectedPorts: []globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts{
+				{
+					ListenerPort: 49152,
+					EndpointPort: 80,
 				},
 			},
 			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
@@ -448,6 +544,18 @@ func TestEndpointGroupReconciler(t *testing.T) {
 					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
 				},
 			},
+			loadBalancerListeners: []elasticloadbalancingv2types.Listener{
+				{
+					LoadBalancerArn: aws.String("arn:aws:elasticloadbalancing:us-east-1:xxx:loadbalancer/yyy"),
+					Port:            aws.Int32(80),
+				},
+			},
+			expectedPorts: []globalacceleratorawswildlifeiov1alpha1.EndpointGroupPorts{
+				{
+					ListenerPort: 49152,
+					EndpointPort: 80,
+				},
+			},
 			expectedGlobalAccelerator: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
 			expectedListener:          aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz"),
 			expectedEndpointGroup:     aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz/endpoint-group/www"),
@@ -470,6 +578,20 @@ func TestEndpointGroupReconciler(t *testing.T) {
 					}
 					return &elasticloadbalancingv2.DescribeLoadBalancersOutput{
 						LoadBalancers: tc.loadBalancers,
+					}, nil
+				},
+				MockDescribeListeners: func(ctx context.Context, input *elasticloadbalancingv2.DescribeListenersInput, opts []func(*elasticloadbalancingv2.Options)) (*elasticloadbalancingv2.DescribeListenersOutput, error) {
+					if tc.describeTargetGroupsError != nil {
+						return nil, tc.describeTargetGroupsError
+					}
+					var loadBalancerListeners []elasticloadbalancingv2types.Listener
+					for _, loadBalancerListener := range tc.loadBalancerListeners {
+						if *loadBalancerListener.LoadBalancerArn == *input.LoadBalancerArn {
+							loadBalancerListeners = append(loadBalancerListeners, loadBalancerListener)
+						}
+					}
+					return &elasticloadbalancingv2.DescribeListenersOutput{
+						Listeners: loadBalancerListeners,
 					}, nil
 				},
 			}
@@ -505,6 +627,9 @@ func TestEndpointGroupReconciler(t *testing.T) {
 			}
 			if tc.expectedEndpointGroup != nil {
 				g.Expect(endpointGroup.Status.EndpointGroupARN).To(BeEquivalentTo(*tc.expectedEndpointGroup))
+			}
+			if tc.expectedPorts != nil {
+				g.Expect(endpointGroup.Status.Ports).To(BeEquivalentTo(tc.expectedPorts))
 			}
 
 		})
