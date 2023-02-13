@@ -21,4 +21,9 @@ resources:
   kind: EndpointGroup
   path: github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1
   version: v1alpha1
+- controller: true
+  domain: infrastructure.wildlife.io
+  group: globalaccelerator.aws.wildlife.io
+  kind: EndpointGroup
+  version: v1alpha1
 version: "3"

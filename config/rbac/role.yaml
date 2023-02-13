@@ -6,6 +6,32 @@ metadata:
   name: manager-role
 rules:
 - apiGroups:
+  - globalaccelerator.aws.wildlife.io.infrastructure.wildlife.io
+  resources:
+  - endpointgroups
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - globalaccelerator.aws.wildlife.io.infrastructure.wildlife.io
+  resources:
+  - endpointgroups/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - globalaccelerator.aws.wildlife.io.infrastructure.wildlife.io
+  resources:
+  - endpointgroups/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
   - infrastructure.wildlife.io
   resources:
   - clustergroups

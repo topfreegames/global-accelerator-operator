@@ -20,10 +20,9 @@ import (
 	"flag"
 	"os"
 
-	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
-	// to ensure that exec-entrypoint and run can make use of them.
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 
+	"github.com/topfreegames/global-accelerator-operator/pkg/aws/elb"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 
@@ -35,7 +34,9 @@ import (
 
 	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
 	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/infrastructure.wildlife.io/v1alpha1"
+	globalacceleratorawswildlifeiocontrollers "github.com/topfreegames/global-accelerator-operator/controllers/globalaccelerator.aws.wildlife.io"
 	infrastructurewildlifeiocontrollers "github.com/topfreegames/global-accelerator-operator/controllers/infrastructure.wildlife.io"
+	"github.com/topfreegames/global-accelerator-operator/pkg/aws/globalaccelerator"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -87,6 +88,15 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ClusterGroup")
+		os.Exit(1)
+	}
+	if err = (&globalacceleratorawswildlifeiocontrollers.EndpointGroupReconciler{
+		Client:                            mgr.GetClient(),
+		Scheme:                            mgr.GetScheme(),
+		NewGlobalAcceleratorClientFactory: globalaccelerator.NewGlobalAcceleratorClient,
+		NewELBClientFactory:               elb.NewELBClient,
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "EndpointGroup")
 		os.Exit(1)
 	}
 	//+kubebuilder:scaffold:builder

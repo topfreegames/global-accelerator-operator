@@ -24,10 +24,16 @@ type EndpointGroupSpec struct {
 	DNSNames []string `json:"dnsNames,omitempty"`
 }
 
+type EndpointGroupPorts struct {
+	ListenerPort int32 `json:"listenerPort,omitempty"`
+	EndpointPort int32 `json:"endpointPort,omitempty"`
+}
+
 type EndpointGroupStatus struct {
-	GlobalAcceleratorARN string `json:"globalAcceleratorARN,omitempty"`
-	ListenerARN          string `json:"listenerARN,omitempty"`
-	EndpointGroupARN     string `json:"endpointGroupARN,omitempty"`
+	GlobalAcceleratorARN string               `json:"globalAcceleratorARN,omitempty"`
+	ListenerARN          string               `json:"listenerARN,omitempty"`
+	EndpointGroupARN     string               `json:"endpointGroupARN,omitempty"`
+	Ports                []EndpointGroupPorts `json:"ports,omitempty"`
 }
 
 //+kubebuilder:object:root=true

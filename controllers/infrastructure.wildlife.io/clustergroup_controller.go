@@ -19,9 +19,8 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"time"
-
 	corev1 "k8s.io/api/core/v1"
+	"time"
 
 	infrastructurewildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/infrastructure.wildlife.io/v1alpha1"
 
@@ -73,14 +72,12 @@ func (r *ClusterGroupReconciler) Reconcile(ctx context.Context, req ctrl.Request
 
 	groupedServices, err := kubernetes.GetGroupedServices(ctx, r.Client, clusterGroup)
 	if err != nil {
-		logger.Error(err, fmt.Sprintf("failed to list services in %s", clusterGroup.Name))
 		return requeue1min, err
 	}
 	for group, services := range groupedServices {
 		endpointGroup := kubernetes.NewEndpointGroup(group, "global-accelerator-operator-system")
 		dnsNames, err := getDNSNameFromGroupedServices(services)
 		if err != nil {
-			logger.Error(err, fmt.Sprintf("failed to retrieve Hostname in %s", group))
 			continue
 		}
 
