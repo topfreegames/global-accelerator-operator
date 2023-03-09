@@ -18,8 +18,9 @@ package globalacceleratorawswildlifeio
 
 import (
 	"context"
-	"github.com/pkg/errors"
 	"time"
+
+	"errors"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
@@ -34,11 +35,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 var (
-	requeue5min = ctrl.Result{RequeueAfter: 5 * time.Minute}
+	endpointGroupFinalizer = "endpointgroup.globalaccelerator.aws.wildlife.io/finalizer"
+	requeue5min            = ctrl.Result{RequeueAfter: 5 * time.Minute}
+	requeue1min            = ctrl.Result{RequeueAfter: 1 * time.Minute}
 )
 
 type EndpointGroupReconciler struct {
@@ -86,6 +90,86 @@ func createListener(ctx context.Context, globalAcceleratorClient globalaccelerat
 	return listener, nil
 }
 
+func (r *EndpointGroupReconciler) reconcileDelete(ctx context.Context, endpointGroup *globalacceleratorawswildlifeiov1alpha1.EndpointGroup) (ctrl.Result, error) {
+
+	cfg, err := awsclient.GetConfig(ctx, "us-west-2") // Global Accelerator API is available in this region
+	if err != nil {
+		return requeue5min, err
+	}
+
+	globalAcceleratorClient := r.NewGlobalAcceleratorClientFactory(*cfg)
+
+	endpointGroupARN := endpointGroup.Status.EndpointGroupARN
+	listenerARN := endpointGroup.Status.ListenerARN
+	acceleratorARN := endpointGroup.Status.GlobalAcceleratorARN
+
+	if endpointGroupARN != "" {
+		err = globalaccelerator.DeleteEndpointGroup(ctx, globalAcceleratorClient, endpointGroupARN)
+		var endpointGroupNotFound *globalacceleratortypes.EndpointGroupNotFoundException
+		if err != nil && !errors.As(err, &endpointGroupNotFound) {
+			return requeue5min, err
+		}
+	}
+
+	shouldDeleteListener, err := shouldDeleteListener(ctx, globalAcceleratorClient, listenerARN)
+	if err != nil {
+		return requeue5min, err
+	}
+	if shouldDeleteListener {
+		err = globalaccelerator.DeleteListener(ctx, globalAcceleratorClient, listenerARN)
+		if err != nil {
+			return requeue5min, err
+		}
+	}
+
+	shouldDeleteAccelerator, err := shouldDeleteAccelerator(ctx, globalAcceleratorClient, acceleratorARN)
+	if err != nil {
+		return requeue5min, err
+	}
+	if shouldDeleteAccelerator {
+		err = globalaccelerator.DeleteAccelerator(ctx, globalAcceleratorClient, acceleratorARN)
+
+		// requeue if accelerator is not ready
+		if errors.Is(err, globalaccelerator.ErrGlobalAcceleratorNotReady) {
+			return requeue1min, nil
+		}
+		if err != nil {
+			return requeue5min, err
+		}
+	}
+
+	controllerutil.RemoveFinalizer(endpointGroup, endpointGroupFinalizer)
+	if err := r.Update(ctx, endpointGroup); err != nil {
+		return requeue5min, err
+	}
+
+	return requeue5min, nil
+}
+
+func shouldDeleteListener(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient, listenerARN string) (bool, error) {
+	endpointGroups, err := globalaccelerator.GetEntpointGroupsFromListener(ctx, globalAcceleratorClient, listenerARN)
+	var listenerNotFound *globalacceleratortypes.ListenerNotFoundException
+	if errors.As(err, &listenerNotFound) || len(endpointGroups) > 0 {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func shouldDeleteAccelerator(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient, acceleratorARN string) (bool, error) {
+	listeners, err := globalaccelerator.GetListenersFromGlobalAccelerator(ctx, globalAcceleratorClient, acceleratorARN)
+	var acceleratorNotFound *globalacceleratortypes.AcceleratorNotFoundException
+	if errors.As(err, &acceleratorNotFound) || len(listeners) > 0 {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 //+kubebuilder:rbac:groups=globalaccelerator.aws.wildlife.io.infrastructure.wildlife.io,resources=endpointgroups,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=globalaccelerator.aws.wildlife.io.infrastructure.wildlife.io,resources=endpointgroups/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=globalaccelerator.aws.wildlife.io.infrastructure.wildlife.io,resources=endpointgroups/finalizers,verbs=update
@@ -95,7 +179,18 @@ func (r *EndpointGroupReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 
 	endpointGroup := &globalacceleratorawswildlifeiov1alpha1.EndpointGroup{}
 	if err := r.Get(ctx, req.NamespacedName, endpointGroup); err != nil {
-		return requeue5min, err
+		return requeue5min, client.IgnoreNotFound(err)
+	}
+
+	if !endpointGroup.ObjectMeta.DeletionTimestamp.IsZero() {
+		return r.reconcileDelete(ctx, endpointGroup)
+	}
+
+	if !controllerutil.ContainsFinalizer(endpointGroup, endpointGroupFinalizer) {
+		controllerutil.AddFinalizer(endpointGroup, endpointGroupFinalizer)
+		if err := r.Update(ctx, endpointGroup); err != nil {
+			return requeue5min, err
+		}
 	}
 
 	cfg, err := awsclient.GetConfig(ctx, "us-west-2") // Global Accelerator API is available in this region

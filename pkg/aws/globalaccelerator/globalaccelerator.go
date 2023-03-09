@@ -3,6 +3,7 @@ package globalaccelerator
 import (
 	"context"
 	"fmt"
+
 	elbv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	globalacceleratortypes "github.com/aws/aws-sdk-go-v2/service/globalaccelerator/types"
 	"github.com/pkg/errors"
@@ -16,11 +17,12 @@ import (
 )
 
 const (
-	CurrentAnnotation = "global-accelerator.alpha.wildlife.io/current"
+	ManagedAnnotation = "global-accelerator.alpha.wildlife.io/managed-by"
 )
 
 var (
 	ErrUnavailableGlobalAccelerator = errors.New("failed to get current GlobalAccelerator")
+	ErrGlobalAcceleratorNotReady    = errors.New("failed to get current GlobalAccelerator")
 )
 
 type GlobalAcceleratorClient interface {
@@ -33,6 +35,11 @@ type GlobalAcceleratorClient interface {
 	ListTagsForResource(ctx context.Context, input *globalaccelerator.ListTagsForResourceInput, opts ...func(*globalaccelerator.Options)) (*globalaccelerator.ListTagsForResourceOutput, error)
 	UntagResource(ctx context.Context, input *globalaccelerator.UntagResourceInput, opts ...func(*globalaccelerator.Options)) (*globalaccelerator.UntagResourceOutput, error)
 	UpdateEndpointGroup(ctx context.Context, input *globalaccelerator.UpdateEndpointGroupInput, opts ...func(*globalaccelerator.Options)) (*globalaccelerator.UpdateEndpointGroupOutput, error)
+	UpdateAccelerator(ctx context.Context, params *globalaccelerator.UpdateAcceleratorInput, optFns ...func(*globalaccelerator.Options)) (*globalaccelerator.UpdateAcceleratorOutput, error)
+	DeleteEndpointGroup(ctx context.Context, params *globalaccelerator.DeleteEndpointGroupInput, optFns ...func(*globalaccelerator.Options)) (*globalaccelerator.DeleteEndpointGroupOutput, error)
+	DeleteListener(ctx context.Context, params *globalaccelerator.DeleteListenerInput, optFns ...func(*globalaccelerator.Options)) (*globalaccelerator.DeleteListenerOutput, error)
+	DeleteAccelerator(ctx context.Context, params *globalaccelerator.DeleteAcceleratorInput, optFns ...func(*globalaccelerator.Options)) (*globalaccelerator.DeleteAcceleratorOutput, error)
+	ListEndpointGroups(ctx context.Context, params *globalaccelerator.ListEndpointGroupsInput, optFns ...func(*globalaccelerator.Options)) (*globalaccelerator.ListEndpointGroupsOutput, error)
 }
 
 func NewGlobalAcceleratorClient(cfg aws.Config) GlobalAcceleratorClient {
@@ -71,24 +78,13 @@ func GetCurrentGlobalAccelerator(ctx context.Context, globalAcceleratorClient Gl
 			continue
 		}
 		for _, tag := range tagsOutput.Tags {
-			if *tag.Key == CurrentAnnotation {
+			if *tag.Key == ManagedAnnotation {
 				ok, err := isGlobalAcceleratorAvailable(ctx, globalAcceleratorClient, globalAccelerator.AcceleratorArn)
 				if err != nil {
 					return nil, err
 				}
 				if ok {
 					return &globalAccelerator, nil
-				} else {
-					_, err := globalAcceleratorClient.UntagResource(ctx, &globalacceleratorsdk.UntagResourceInput{
-						ResourceArn: globalAccelerator.AcceleratorArn,
-						TagKeys: []string{
-							CurrentAnnotation,
-						},
-					})
-					if err != nil {
-						return nil, err
-					}
-					return nil, ErrUnavailableGlobalAccelerator
 				}
 			}
 		}
@@ -101,8 +97,8 @@ func CreateGlobalAccelerator(ctx context.Context, globalAcceleratorClient Global
 		Name: aws.String(fmt.Sprintf("global-accelerator-%s", rand.String(8))),
 		Tags: []globalacceleratortypes.Tag{
 			{
-				Key:   aws.String(CurrentAnnotation),
-				Value: aws.String("true"),
+				Key:   aws.String(ManagedAnnotation),
+				Value: aws.String("global-accelerator-controller"),
 			},
 		},
 	})
@@ -151,6 +147,60 @@ func CreateListener(ctx context.Context, globalAcceleratorClient GlobalAccelerat
 		return nil, err
 	}
 	return createdListener.Listener, nil
+}
+
+func DeleteEndpointGroup(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, endpointGroupARN string) error {
+	_, err := globalAcceleratorClient.DeleteEndpointGroup(ctx, &globalaccelerator.DeleteEndpointGroupInput{EndpointGroupArn: &endpointGroupARN})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteListener(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, listenerARN string) error {
+	_, err := globalAcceleratorClient.DeleteListener(ctx, &globalaccelerator.DeleteListenerInput{ListenerArn: &listenerARN})
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func DeleteAccelerator(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, acceleratorARN string) error {
+	globalAccelerator, err := GetGlobalAcceleratorWithARN(ctx, globalAcceleratorClient, acceleratorARN)
+	if err != nil {
+		return err
+	}
+	if *globalAccelerator.Enabled {
+		_, err := globalAcceleratorClient.UpdateAccelerator(ctx, &globalacceleratorsdk.UpdateAcceleratorInput{
+			AcceleratorArn: &acceleratorARN,
+			Enabled:        aws.Bool(false),
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	if globalAccelerator.Status == globalacceleratortypes.AcceleratorStatusInProgress {
+		return ErrGlobalAcceleratorNotReady
+	}
+
+	_, err = globalAcceleratorClient.DeleteAccelerator(ctx, &globalaccelerator.DeleteAcceleratorInput{AcceleratorArn: &acceleratorARN})
+	var acceleratorNotDisabled *globalacceleratortypes.AcceleratorNotDisabledException
+	if errors.As(err, &acceleratorNotDisabled) {
+		return ErrGlobalAcceleratorNotReady
+	}
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func GetEntpointGroupsFromListener(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, listenerARN string) ([]globalacceleratortypes.EndpointGroup, error) {
+	endpointGroupOutput, err := globalAcceleratorClient.ListEndpointGroups(ctx, &globalacceleratorsdk.ListEndpointGroupsInput{ListenerArn: &listenerARN})
+	if err != nil {
+		return nil, err
+	}
+	return endpointGroupOutput.EndpointGroups, nil
 }
 
 func checkIfListenerPortIsAvailable(listeners []globalacceleratortypes.Listener, listenerPort int) bool {
