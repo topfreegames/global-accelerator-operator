@@ -195,7 +195,7 @@ func DeleteAccelerator(ctx context.Context, globalAcceleratorClient GlobalAccele
 	return nil
 }
 
-func GetEntpointGroupsFromListener(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, listenerARN string) ([]globalacceleratortypes.EndpointGroup, error) {
+func GetEndpointGroupsFromListener(ctx context.Context, globalAcceleratorClient GlobalAcceleratorClient, listenerARN string) ([]globalacceleratortypes.EndpointGroup, error) {
 	endpointGroupOutput, err := globalAcceleratorClient.ListEndpointGroups(ctx, &globalacceleratorsdk.ListEndpointGroupsInput{ListenerArn: &listenerARN})
 	if err != nil {
 		return nil, err

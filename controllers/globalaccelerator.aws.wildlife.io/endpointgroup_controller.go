@@ -147,7 +147,7 @@ func (r *EndpointGroupReconciler) reconcileDelete(ctx context.Context, endpointG
 }
 
 func shouldDeleteListener(ctx context.Context, globalAcceleratorClient globalaccelerator.GlobalAcceleratorClient, listenerARN string) (bool, error) {
-	endpointGroups, err := globalaccelerator.GetEntpointGroupsFromListener(ctx, globalAcceleratorClient, listenerARN)
+	endpointGroups, err := globalaccelerator.GetEndpointGroupsFromListener(ctx, globalAcceleratorClient, listenerARN)
 	var listenerNotFound *globalacceleratortypes.ListenerNotFoundException
 	if errors.As(err, &listenerNotFound) || len(endpointGroups) > 0 {
 		return false, nil
