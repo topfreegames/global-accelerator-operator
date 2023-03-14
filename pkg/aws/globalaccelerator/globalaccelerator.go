@@ -171,13 +171,14 @@ func DeleteAccelerator(ctx context.Context, globalAcceleratorClient GlobalAccele
 		return err
 	}
 	if *globalAccelerator.Enabled {
-		_, err := globalAcceleratorClient.UpdateAccelerator(ctx, &globalacceleratorsdk.UpdateAcceleratorInput{
+		acceleratorOutput, err := globalAcceleratorClient.UpdateAccelerator(ctx, &globalacceleratorsdk.UpdateAcceleratorInput{
 			AcceleratorArn: &acceleratorARN,
 			Enabled:        aws.Bool(false),
 		})
 		if err != nil {
 			return err
 		}
+		globalAccelerator = acceleratorOutput.Accelerator
 	}
 
 	if globalAccelerator.Status == globalacceleratortypes.AcceleratorStatusInProgress {
