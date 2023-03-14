@@ -3,8 +3,12 @@ package globalaccelerator
 import (
 	"context"
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
+	"github.com/aws/aws-sdk-go-v2/service/globalaccelerator"
 	globalacceleratorsdk "github.com/aws/aws-sdk-go-v2/service/globalaccelerator"
 	globalacceleratortypes "github.com/aws/aws-sdk-go-v2/service/globalaccelerator/types"
 	. "github.com/onsi/ginkgo/v2"
@@ -13,8 +17,6 @@ import (
 	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
 	fakeglobalaccelerator "github.com/topfreegames/global-accelerator-operator/pkg/aws/globalaccelerator/fake"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"strings"
-	"testing"
 )
 
 type globalAccelerator struct {
@@ -128,8 +130,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -157,8 +159,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -183,8 +185,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -210,8 +212,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -848,6 +850,239 @@ func TestGetEndpointGroupConfigurations(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			endpointConfigurations := GetEndpointGroupConfigurations(tc.loadBalancers)
 			g.Expect(endpointConfigurations).To(BeEquivalentTo(tc.expectedEndpointGroupConfiguration))
+		})
+	}
+}
+
+func TestDeleteEndpointGroup(t *testing.T) {
+	RegisterFailHandler(Fail)
+	g := NewWithT(t)
+
+	testCases := []struct {
+		description              string
+		endpointGroupARN         string
+		deleteEndpointGroupError error
+		expectedError            bool
+	}{
+		{
+			description:              "should successfully delete endpointgroup",
+			endpointGroupARN:         "arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz/endpoint-group/www",
+			deleteEndpointGroupError: nil,
+			expectedError:            false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			fakeGlobalAcceleratorClient := &fakeglobalaccelerator.MockGlobalAcceleratorClient{
+				MockDeleteEndpointGroup: func(ctx context.Context, input *globalacceleratorsdk.DeleteEndpointGroupInput, opts []func(*globalacceleratorsdk.Options)) (*globalaccelerator.DeleteEndpointGroupOutput, error) {
+					if tc.deleteEndpointGroupError != nil {
+						return nil, tc.deleteEndpointGroupError
+					}
+					return &globalacceleratorsdk.DeleteEndpointGroupOutput{}, nil
+				},
+			}
+
+			err := DeleteEndpointGroup(context.TODO(), fakeGlobalAcceleratorClient, tc.endpointGroupARN)
+			if tc.expectedError {
+				g.Expect(err).Should(HaveOccurred())
+			} else {
+				g.Expect(err).ShouldNot(HaveOccurred())
+			}
+		})
+	}
+}
+
+func TestDeleteListener(t *testing.T) {
+	RegisterFailHandler(Fail)
+	g := NewWithT(t)
+
+	testCases := []struct {
+		description         string
+		listenerARN         string
+		deleteListenerError error
+		expectedError       bool
+	}{
+		{
+			description:         "should successfully delete listener",
+			listenerARN:         "arn:aws:globalaccelerator::xxx:accelerator/yyy/listener/zzz",
+			deleteListenerError: nil,
+			expectedError:       false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			fakeGlobalAcceleratorClient := &fakeglobalaccelerator.MockGlobalAcceleratorClient{
+				MockDeleteListener: func(ctx context.Context, input *globalacceleratorsdk.DeleteListenerInput, opts []func(*globalacceleratorsdk.Options)) (*globalacceleratorsdk.DeleteListenerOutput, error) {
+					if tc.deleteListenerError != nil {
+						return nil, tc.deleteListenerError
+					}
+					return &globalacceleratorsdk.DeleteListenerOutput{}, nil
+				},
+			}
+
+			err := DeleteListener(context.TODO(), fakeGlobalAcceleratorClient, tc.listenerARN)
+			if tc.expectedError {
+				g.Expect(err).Should(HaveOccurred())
+			} else {
+				g.Expect(err).ShouldNot(HaveOccurred())
+			}
+		})
+	}
+}
+func TestDeleteAccelerator(t *testing.T) {
+	RegisterFailHandler(Fail)
+	g := NewWithT(t)
+
+	testCases := []struct {
+		description               string
+		globalAcceleratorARN      string
+		deleteAcceleratorError    error
+		describeAcceleratorError  error
+		updateAcceleratorError    error
+		expectedError             bool
+		globalAccelerators        []globalAccelerator
+		updatedGlobalAccelerators []globalAccelerator
+	}{
+		{
+			description:            "should successfully delete accelerator",
+			globalAcceleratorARN:   "arn:aws:globalaccelerator::xxx:accelerator/yyy",
+			deleteAcceleratorError: nil,
+			expectedError:          true,
+			globalAccelerators: []globalAccelerator{
+				{
+					GlobalAccelerator: globalacceleratortypes.Accelerator{
+						AcceleratorArn: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
+						Enabled:        aws.Bool(true),
+						Status:         globalacceleratortypes.AcceleratorStatusDeployed,
+					},
+					Tags: []globalacceleratortypes.Tag{
+						{
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
+						},
+					},
+				},
+			},
+			updatedGlobalAccelerators: []globalAccelerator{
+				{
+					GlobalAccelerator: globalacceleratortypes.Accelerator{
+						AcceleratorArn: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
+						Enabled:        aws.Bool(true),
+						Status:         globalacceleratortypes.AcceleratorStatusInProgress,
+					},
+					Tags: []globalacceleratortypes.Tag{
+						{
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
+						},
+					},
+				},
+			},
+		},
+		{
+			description:            "should successfully delete accelerator",
+			globalAcceleratorARN:   "arn:aws:globalaccelerator::xxx:accelerator/yyy",
+			deleteAcceleratorError: nil,
+			expectedError:          false,
+			globalAccelerators: []globalAccelerator{
+				{
+					GlobalAccelerator: globalacceleratortypes.Accelerator{
+						AcceleratorArn: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
+						Enabled:        aws.Bool(true),
+						Status:         globalacceleratortypes.AcceleratorStatusDeployed,
+					},
+					Tags: []globalacceleratortypes.Tag{
+						{
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
+						},
+					},
+				},
+			},
+			updatedGlobalAccelerators: []globalAccelerator{
+				{
+					GlobalAccelerator: globalacceleratortypes.Accelerator{
+						AcceleratorArn: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
+						Enabled:        aws.Bool(false),
+						Status:         globalacceleratortypes.AcceleratorStatusDeployed,
+					},
+					Tags: []globalacceleratortypes.Tag{
+						{
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
+						},
+					},
+				},
+			},
+		},
+		{
+			description:            "should successfully delete accelerator",
+			globalAcceleratorARN:   "arn:aws:globalaccelerator::xxx:accelerator/yyy",
+			deleteAcceleratorError: nil,
+			expectedError:          false,
+			globalAccelerators: []globalAccelerator{
+				{
+					GlobalAccelerator: globalacceleratortypes.Accelerator{
+						AcceleratorArn: aws.String("arn:aws:globalaccelerator::xxx:accelerator/yyy"),
+						Enabled:        aws.Bool(false),
+						Status:         globalacceleratortypes.AcceleratorStatusDeployed,
+					},
+					Tags: []globalacceleratortypes.Tag{
+						{
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			fakeGlobalAcceleratorClient := &fakeglobalaccelerator.MockGlobalAcceleratorClient{
+				MockDeleteAccelerator: func(ctx context.Context, input *globalacceleratorsdk.DeleteAcceleratorInput, opts []func(*globalacceleratorsdk.Options)) (*globalacceleratorsdk.DeleteAcceleratorOutput, error) {
+					if tc.deleteAcceleratorError != nil {
+						return nil, tc.deleteAcceleratorError
+					}
+					return &globalacceleratorsdk.DeleteAcceleratorOutput{}, nil
+				},
+				MockDescribeAccelerator: func(ctx context.Context, input *globalacceleratorsdk.DescribeAcceleratorInput, opts []func(*globalacceleratorsdk.Options)) (*globalacceleratorsdk.DescribeAcceleratorOutput, error) {
+					if tc.describeAcceleratorError != nil {
+						return nil, tc.describeAcceleratorError
+					}
+					var globalAccelerator globalacceleratortypes.Accelerator
+					for _, ga := range tc.globalAccelerators {
+						if *ga.GlobalAccelerator.AcceleratorArn == *input.AcceleratorArn {
+							globalAccelerator = ga.GlobalAccelerator
+							break
+						}
+					}
+					return &globalacceleratorsdk.DescribeAcceleratorOutput{Accelerator: &globalAccelerator}, nil
+				},
+				MockUpdateAccelerator: func(ctx context.Context, input *globalacceleratorsdk.UpdateAcceleratorInput, opts []func(*globalacceleratorsdk.Options)) (*globalacceleratorsdk.UpdateAcceleratorOutput, error) {
+					if tc.updateAcceleratorError != nil {
+						return nil, tc.updateAcceleratorError
+					}
+					var globalAccelerator globalacceleratortypes.Accelerator
+					for _, ga := range tc.updatedGlobalAccelerators {
+						if *ga.GlobalAccelerator.AcceleratorArn == *input.AcceleratorArn {
+							globalAccelerator = ga.GlobalAccelerator
+							break
+						}
+					}
+					return &globalacceleratorsdk.UpdateAcceleratorOutput{Accelerator: &globalAccelerator}, nil
+				},
+			}
+
+			err := DeleteAccelerator(context.TODO(), fakeGlobalAcceleratorClient, tc.globalAcceleratorARN)
+			if tc.expectedError {
+				g.Expect(err).Should(HaveOccurred())
+			} else {
+				g.Expect(err).ShouldNot(HaveOccurred())
+			}
 		})
 	}
 }
