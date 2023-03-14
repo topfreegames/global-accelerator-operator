@@ -3,6 +3,9 @@ package globalaccelerator
 import (
 	"context"
 	"fmt"
+	"strings"
+	"testing"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
 	globalacceleratorsdk "github.com/aws/aws-sdk-go-v2/service/globalaccelerator"
@@ -13,8 +16,6 @@ import (
 	globalacceleratorawswildlifeiov1alpha1 "github.com/topfreegames/global-accelerator-operator/apis/globalaccelerator.aws.wildlife.io/v1alpha1"
 	fakeglobalaccelerator "github.com/topfreegames/global-accelerator-operator/pkg/aws/globalaccelerator/fake"
 	"k8s.io/apimachinery/pkg/util/rand"
-	"strings"
-	"testing"
 )
 
 type globalAccelerator struct {
@@ -128,8 +129,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -157,8 +158,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -183,8 +184,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
@@ -210,8 +211,8 @@ func TestGetCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},

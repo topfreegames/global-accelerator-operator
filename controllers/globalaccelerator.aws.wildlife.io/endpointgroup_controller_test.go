@@ -3,6 +3,8 @@ package globalacceleratorawswildlifeio
 import (
 	"context"
 	"fmt"
+	"strings"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2"
 	elasticloadbalancingv2types "github.com/aws/aws-sdk-go-v2/service/elasticloadbalancingv2/types"
@@ -15,7 +17,6 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
-	"strings"
 
 	globalacceleratorsdk "github.com/aws/aws-sdk-go-v2/service/globalaccelerator"
 	globalacceleratortypes "github.com/aws/aws-sdk-go-v2/service/globalaccelerator/types"
@@ -194,8 +195,8 @@ func TestGetOrCreateCurrentGlobalAccelerator(t *testing.T) {
 					},
 					Tags: []globalacceleratortypes.Tag{
 						{
-							Key:   aws.String(globalaccelerator.CurrentAnnotation),
-							Value: aws.String("true"),
+							Key:   aws.String(globalaccelerator.ManagedAnnotation),
+							Value: aws.String("global-accelerator-controller"),
 						},
 					},
 				},
